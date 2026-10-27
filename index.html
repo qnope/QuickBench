@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QuickBench</title>
+  <meta name="description" content="Quick C++ micro-benchmarks in the browser, compiled and run through Compiler Explorer.">
+  <link rel="stylesheet" href="vendor/codemirror/codemirror.css">
+  <link rel="stylesheet" href="vendor/codemirror/material-darker.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⏱</span>
+      <span class="title">QuickBench</span>
+      <span class="subtitle">C++ micro-benchmarks, powered by Compiler Explorer</span>
+    </div>
+    <nav class="links">
+      <a href="https://github.com/google/benchmark/blob/main/docs/user_guide.md" target="_blank" rel="noopener">Google Benchmark docs</a>
+      <a href="https://godbolt.org" target="_blank" rel="noopener">Compiler Explorer</a>
+    </nav>
+  </header>
+
+  <section class="toolbar">
+    <label>Compiler
+      <select id="compiler"><option>Loading…</option></select>
+    </label>
+    <label>Std
+      <select id="std">
+        <option value="c++17">C++17</option>
+        <option value="c++20" selected>C++20</option>
+        <option value="c++23">C++23</option>
+        <option value="c++2c">C++26</option>
+      </select>
+    </label>
+    <label>Optim
+      <select id="opt">
+        <option value="-O0">None</option>
+        <option value="-O1">O1</option>
+        <option value="-O2">O2</option>
+        <option value="-O3" selected>O3</option>
+        <option value="-Os">Os</option>
+        <option value="-Ofast">Ofast</option>
+      </select>
+    </label>
+    <label class="grow">Extra flags
+      <input id="flags" type="text" placeholder="-march=native -DNDEBUG" spellcheck="false">
+    </label>
+    <label class="grow">Run args
+      <input id="runargs" type="text" value="--benchmark_min_time=0.1s" spellcheck="false">
+    </label>
+    <div class="actions">
+      <button id="run" class="primary" disabled>Run benchmark</button>
+      <button id="share" title="Copy a link to this benchmark">Share</button>
+      <button id="godbolt" title="Open this code in Compiler Explorer">Open in CE</button>
+    </div>
+  </section>
+
+  <main class="layout">
+    <section class="pane editor-pane">
+      <div class="pane-head">
+        <span>Source</span>
+        <span class="hint">No <code>main</code> needed: <code>benchmark.h</code>, a Noop baseline and <code>BENCHMARK_MAIN()</code> are added for you.</span>
+      </div>
+      <div id="editor"></div>
+    </section>
+
+    <section class="pane result-pane">
+      <div class="pane-head">
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="chart" role="tab">Chart</button>
+          <button class="tab" data-tab="table" role="tab">Table</button>
+          <button class="tab" data-tab="output" role="tab">Output</button>
+        </div>
+        <span id="status" class="status">Idle</span>
+      </div>
+      <div class="tab-body active" data-tab="chart">
+        <div id="chart-empty" class="empty">Run a benchmark to see results here.</div>
+        <div class="chart-wrap"><canvas id="chart" aria-label="Benchmark results"></canvas></div>
+        <div id="summary" class="summary"></div>
+      </div>
+      <div class="tab-body" data-tab="table">
+        <table id="table">
+          <thead><tr><th>Benchmark</th><th>CPU time</th><th>Real time</th><th>Iterations</th><th>CPU / Noop</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="tab-body" data-tab="output">
+        <pre id="output"></pre>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Compilation and execution happen on <a href="https://godbolt.org" target="_blank" rel="noopener">godbolt.org</a> shared machines: absolute timings are noisy, compare benchmarks relative to each other.
+  </footer>
+
+  <script src="vendor/codemirror/codemirror.js"></script>
+  <script src="vendor/codemirror/clike.js"></script>
+  <script src="vendor/codemirror/matchbrackets.js"></script>
+  <script src="vendor/codemirror/closebrackets.js"></script>
+  <script src="vendor/chartjs/chart.umd.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
