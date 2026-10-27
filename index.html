@@ -7,7 +7,7 @@
   <meta name="description" content="Quick C++ micro-benchmarks in the browser, compiled and run through Compiler Explorer.">
   <link rel="stylesheet" href="vendor/codemirror/codemirror.css">
   <link rel="stylesheet" href="vendor/codemirror/material-darker.css">
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <header class="topbar">
@@ -44,9 +44,6 @@
         <option value="-Ofast">Ofast</option>
       </select>
     </label>
-    <label>Benchmark lib
-      <select id="libver"><option value="">Auto</option></select>
-    </label>
     <label class="grow">Extra flags
       <input id="flags" type="text" placeholder="-march=native -DNDEBUG" spellcheck="false">
     </label>
@@ -64,7 +61,7 @@
     <section class="pane editor-pane">
       <div class="pane-head">
         <span>Source</span>
-        <span class="hint">No <code>main</code> needed: <code>benchmark.h</code>, a Noop baseline and <code>BENCHMARK_MAIN()</code> are added for you.</span>
+        <span class="hint">Google Benchmark API, no <code>main</code> needed: a Noop baseline and <code>BENCHMARK_MAIN()</code> are added for you.</span>
       </div>
       <div id="editor"></div>
     </section>
@@ -104,6 +101,6 @@
   <script src="vendor/codemirror/matchbrackets.js"></script>
   <script src="vendor/codemirror/closebrackets.js"></script>
   <script src="vendor/chartjs/chart.umd.js"></script>
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>
