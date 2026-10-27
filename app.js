@@ -6,6 +6,8 @@ const CE_API = 'https://godbolt.org/api';
 const BENCH_LIB_ID = 'benchmark';
 const NOOP_NAME = 'Noop';
 const STORAGE_KEY = 'quickbench.state';
+const LIB_CACHE_KEY = 'quickbench.libByCompiler';
+const MAX_LIB_ATTEMPTS = 4;
 
 const DEFAULT_SOURCE = `static void StringCreation(benchmark::State& state) {
   // Code inside this loop is measured repeatedly
@@ -37,6 +39,7 @@ const ui = {
   opt: $('opt'),
   flags: $('flags'),
   runargs: $('runargs'),
+  libver: $('libver'),
   run: $('run'),
   share: $('share'),
   godbolt: $('godbolt'),
@@ -47,7 +50,7 @@ const ui = {
   tableBody: document.querySelector('#table tbody'),
 };
 
-let benchLib = null;   // { id, version } of Google Benchmark on Compiler Explorer
+let benchLib = null;   // { id, versions: [{ id, label }] } of Google Benchmark on Compiler Explorer
 let chart = null;
 let pendingCompiler = null;
 
@@ -76,6 +79,7 @@ function currentState() {
     opt: ui.opt.value,
     flags: ui.flags.value,
     runargs: ui.runargs.value,
+    libver: ui.libver.value,
   };
 }
 
@@ -87,6 +91,7 @@ function applyState(s) {
   if (typeof s.flags === 'string') ui.flags.value = s.flags;
   if (typeof s.runargs === 'string') ui.runargs.value = s.runargs;
   if (s.compiler) pendingCompiler = s.compiler;
+  if (s.libver) ui.libver.dataset.pending = s.libver;
 }
 
 function encodeState(s) {
@@ -146,17 +151,54 @@ async function loadBenchmarkLibrary() {
   if (!lib || !lib.versions || !lib.versions.length) {
     throw new Error('Google Benchmark is not available on Compiler Explorer');
   }
-  // Prefer the newest released version over trunk, which can be unstable.
-  const released = lib.versions.filter((v) => !/trunk/i.test(v.id));
-  const pool = released.length ? released : lib.versions;
-  const best = pool.slice().sort(compareVersions).pop();
-  benchLib = { id: lib.id, version: best.id, label: best.version || best.id };
+  // Newest released versions first, trunk last: prebuilt binaries are not
+  // available for every compiler/version pair, so runs may need to fall back.
+  const isTrunk = (v) => /trunk/i.test(v.id);
+  const versions = lib.versions.filter((v) => !isTrunk(v)).sort(compareVersions).reverse()
+    .concat(lib.versions.filter(isTrunk))
+    .map((v) => ({ id: v.id, label: v.version || v.id }));
+  benchLib = { id: lib.id, versions };
+
+  const pending = ui.libver.dataset.pending;
+  ui.libver.innerHTML = '<option value="">Auto</option>';
+  versions.forEach((v) => {
+    const o = document.createElement('option');
+    o.value = v.id;
+    o.textContent = v.label;
+    ui.libver.appendChild(o);
+  });
+  if (pending && versions.some((v) => v.id === pending)) ui.libver.value = pending;
+}
+
+function loadLibCache() {
+  try { return JSON.parse(localStorage.getItem(LIB_CACHE_KEY)) || {}; } catch (e) { return {}; }
+}
+
+function rememberLib(compiler, version) {
+  const cache = loadLibCache();
+  cache[compiler] = version;
+  try { localStorage.setItem(LIB_CACHE_KEY, JSON.stringify(cache)); } catch (e) { /* ignore */ }
+}
+
+// Library versions to try, in order, for the given state.
+function libCandidates(s) {
+  if (s.libver) return [s.libver];
+  const known = loadLibCache()[s.compiler];
+  const ids = benchLib.versions.map((v) => v.id);
+  return (known && ids.includes(known) ? [known] : []).concat(ids.filter((id) => id !== known)).slice(0, MAX_LIB_ATTEMPTS);
+}
+
+function libLabel(id) {
+  const v = benchLib.versions.find((x) => x.id === id);
+  return v ? v.label : id;
 }
 
 function isUsableCompiler(c) {
   if (c.supportsExecute === false) return false;
   if (c.instructionSet && c.instructionSet !== 'amd64') return false;
-  return /^(x86-64 )?(gcc|clang) /i.test(c.name) && !/(assert|trunk|cross|cuda|hip|rocm|ibm|bpf|wasm|cl430)/i.test(c.name);
+  // Only plain released toolchains: experimental/trunk builds often lack the
+  // prebuilt Google Benchmark binaries.
+  return /^x86-64 (gcc|clang) \d+(\.\d+)*$/i.test(c.name.trim());
 }
 
 async function loadCompilers() {
@@ -210,7 +252,7 @@ function splitArgs(str) {
   return (str.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || []).map((a) => a.replace(/^["']|["']$/g, ''));
 }
 
-async function compileAndRun(s) {
+async function compileAndRun(s, libVersion) {
   const body = {
     source: buildSource(s.src),
     lang: 'c++',
@@ -224,7 +266,7 @@ async function compileAndRun(s) {
       compilerOptions: { executorRequest: true, skipAsm: true },
       filters: { execute: true },
       tools: [],
-      libraries: [{ id: benchLib.id, version: benchLib.version }],
+      libraries: [{ id: benchLib.id, version: libVersion }],
     },
   };
   const res = await fetch(`${CE_API}/compiler/${encodeURIComponent(s.compiler)}/compile`, {
@@ -236,7 +278,15 @@ async function compileAndRun(s) {
   return res.json();
 }
 
-const joinLines = (arr) => (arr || []).map((l) => l.text).join('\n');
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const joinLines = (arr) => (arr || []).map((l) => l.text.replace(ANSI_RE, '')).join('\n');
+
+function isMissingLibrary(r) {
+  const b = r.buildResult || {};
+  const text = joinLines(b.stdout) + joinLines(b.stderr) + joinLines(r.stderr);
+  return /cannot find -lbenchmark|benchmark\/benchmark\.h: No such file|undefined reference to `benchmark::/.test(text);
+}
 
 // -------------------------------------------------------------- results ----
 
@@ -366,7 +416,20 @@ async function runBenchmark() {
   setStatus('Compiling and running on godbolt.org…', 'running');
   const t0 = performance.now();
   try {
-    const r = await compileAndRun(s);
+    let r = null;
+    let libVersion = null;
+    for (const candidate of libCandidates(s)) {
+      libVersion = candidate;
+      setStatus(`Compiling with Google Benchmark ${libLabel(candidate)} and running on godbolt.org…`, 'running');
+      r = await compileAndRun(s, candidate);
+      if (!isMissingLibrary(r)) break;
+    }
+    if (isMissingLibrary(r)) {
+      setOutput([{ title: 'Build', text: joinLines((r.buildResult || {}).stderr), error: true }]);
+      setStatus('Google Benchmark is not available for this compiler, try another one', 'error');
+      showTab('output');
+      return;
+    }
     const build = r.buildResult || {};
     const stdout = joinLines(r.stdout);
     const stderr = joinLines(r.stderr);
@@ -393,9 +456,10 @@ async function runBenchmark() {
       showTab('output');
       return;
     }
+    rememberLib(s.compiler, libVersion);
     renderResults(data);
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
-    setStatus(`Done in ${secs}s · ${benchLib.label ? 'benchmark ' + benchLib.label : ''}`, 'ok');
+    setStatus(`Done in ${secs}s · Google Benchmark ${libLabel(libVersion)}`, 'ok');
     showTab('chart');
   } catch (e) {
     setStatus(e.message, 'error');
@@ -419,7 +483,7 @@ function shareLink() {
 
 function openInCompilerExplorer() {
   const s = currentState();
-  const libs = benchLib ? [{ name: benchLib.id, ver: benchLib.version }] : [];
+  const libs = benchLib ? [{ name: benchLib.id, ver: libCandidates(s)[0] }] : [];
   const options = compilerArgs(s);
   const state = {
     sessions: [{
@@ -442,7 +506,7 @@ ui.run.addEventListener('click', runBenchmark);
 ui.share.addEventListener('click', shareLink);
 ui.godbolt.addEventListener('click', openInCompilerExplorer);
 editor.on('change', () => { clearTimeout(editor._saveTimer); editor._saveTimer = setTimeout(saveState, 500); });
-[ui.compiler, ui.std, ui.opt, ui.flags, ui.runargs].forEach((el) => el.addEventListener('change', saveState));
+[ui.compiler, ui.std, ui.opt, ui.flags, ui.runargs, ui.libver].forEach((el) => el.addEventListener('change', saveState));
 
 async function init() {
   applyState(loadInitialState());
@@ -450,7 +514,7 @@ async function init() {
   try {
     await Promise.all([loadCompilers(), loadBenchmarkLibrary()]);
     ui.run.disabled = false;
-    setStatus(`Ready · Google Benchmark ${benchLib.label}`, 'ok');
+    setStatus('Ready', 'ok');
   } catch (e) {
     setStatus('Could not reach Compiler Explorer', 'error');
     setOutput([{ title: 'Error', text: String(e.message || e), error: true }]);
